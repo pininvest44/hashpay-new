@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bulk STK Push Console (Till Optimized)</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f6f9; color: #333; margin: 0; padding: 20px; }
+        .container { max-width: 750px; background: white; margin: 20px auto; padding: 25px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        h2 { margin-top: 0; color: #111; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; }
+        textarea, input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        textarea { height: 120px; resize: vertical; }
+        button { background: #0066cc; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; width: 100%; transition: background 0.2s; }
+        button:disabled { background: #cccccc; cursor: not-allowed; }
+        .progress-box { background: #eef2f7; padding: 15px; border-radius: 4px; margin-top: 20px; display: none; }
+        .progress-bar-bg { background: #ddd; border-radius: 4px; height: 15px; width: 100%; margin-top: 8px; overflow: hidden; }
+        .progress-bar-fill { background: #22c55e; height: 100%; width: 0%; transition: width 0.3s; }
+        .log-container { margin-top: 25px; }
+        .log-item { padding: 8px 12px; border-bottom: 1px solid #eee; font-family: monospace; font-size: 13px; word-break: break-all; }
+        .Success { border-left: 4px solid #22c55e; background: #f0fdf4; }
+        .Failed { border-left: 4px solid #ef4444; background: #fef2f2; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Bulk STK Push Dispatcher</h2>
+    <p style="color: #666; font-size:14px; margin-top:-10px;">Optimized for Till Payments (30 req / minute speed-governed queue)</p>
+    
+    <div class="form-group">
+        <label for="phones">Phone Numbers (One per line, format: 2547XXXXXXXX):</label>
+        <textarea id="phones" placeholder="254712345678&#10;254722000000"></textarea>
+    </div>
+
+    <div class="form-group">
+        <label for="amount">Amount (KES):</label>
+        <input type="number" id="amount" value="10" min="1">
+    </div>
+
+    <button id="submitBtn" onclick="startBulkJob()">Initiate Bulk Payment Request</button>
+
+    <div id="progressBox" class="progress-box">
+        <div id="statusText">Processing requests: 0 / 0</div>
+        <div class="progress-bar-bg">
+            <div id="progressBarFill" class="progress-bar-fill"></div>
+        </div>
+    </div>
+
+    <div class="log-container">
+        <h3>Execution Activity Logs</h3>
+        <div id="logsOut"></div>
+    </div>
+</div>
+
+<script>
+    let statusInterval;
+
+    async function startBulkJob() {
+        const phones = document.getElementById('phones').value;
+        const amount = document.getElementById('amount').value;
+        const submitBtn = document.getElementById('submitBtn');
+
+        if(!phones.trim() || !amount) return alert('Please satisfy all inputs before proceeding.');
+
+        submitBtn.disabled = true;
+        document.getElementById('logsOut').innerHTML = '';
+        document.getElementById('progressBox').style.display = 'block';
+
+        try {
+            const res = await fetch('/api/initiate-bulk', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phones, amount })
+            });
+            const data = await res.json();
+            
+            if(!res.ok) throw new Error(data.error || 'Server rejected submission');
+
+            // Start polling progress metrics
+            statusInterval = setInterval(checkJobStatus, 1000);
+        } catch (err) {
+            alert(err.message);
+            submitBtn.disabled = false;
+        }
+    }
+
+    async function checkJobStatus() {
+        try {
+            const res = await fetch('/api/job-status');
+            const data = await res.json();
+
+            const percentage = data.total > 0 ? (data.processed / data.total) * 100 : 0;
+            document.getElementById('progressBarFill').style.style.width = `${percentage}%`;
+            document.getElementById('statusText').innerText = `Processing requests: ${data.processed} / ${data.total}`;
+
+            // Redraw execution activity logs array
+            const logsOut = document.getElementById('logsOut');
+            logsOut.innerHTML = data.logs.map(log => `
+                <div class="log-item ${log.status}">
+                    <strong>[${log.status}]</strong> ${log.phone} — Status Detail: ${log.detail}
+                </div>
+            `).join('');
+
+            if (!data.isProcessing) {
+                clearInterval(statusInterval);
+                document.getElementById('submitBtn').disabled = false;
+                alert('Bulk transaction run complete.');
+            }
+        } catch (err) {
+            console.error('Error fetching job runtime states:', err);
+        }
+    }
+</script>
+</body>
+</html>
